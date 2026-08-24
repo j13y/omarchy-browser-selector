@@ -112,21 +112,28 @@ ensure_config() {
     done
   fi
 
-  local rules="[]" url_rules="[]"
-  if find_desktop_file brave-browser.desktop >/dev/null 2>&1; then
-    rules='[{"match":["slack","whatsapp"],"browser":"brave-browser.desktop"}]'
-    url_rules='[{"match":["facebook\\.com"],"browser":"brave-browser.desktop"}]'
-  fi
-
-  jq -n --arg d "$current_default" --argjson rules "$rules" --argjson urlRules "$url_rules" '{
-    "_readme": "See README.md. `default` is the fallback browser (a .desktop id). `rules` match the focused *app* window (class/initialClass/title); `urlRules` match the *link itself* (its full URL) and only apply when no app rule matched — so an app rule always overrides a url rule for the same link. Both are regex, case-insensitive, first match wins within each list.",
+  # Nothing routes anywhere until you turn it on: `rules`/`urlRules` start
+  # empty and `_examples` — never read by the matcher, purely for you to
+  # copy from — shows the two kinds of rule so a fresh install doesn't
+  # silently start routing links you never asked it to.
+  jq -n --arg d "$current_default" '{
+    "_readme": "See README.md. `default` is the fallback browser (a .desktop id). `rules` match the focused *app* window (class/initialClass/title); `urlRules` match the *link itself* (its full URL) and only apply when no app rule matched — so an app rule always overrides a url rule for the same link. Both are regex, case-insensitive, first match wins within each list. `_examples` below is inert documentation, never consumed by matching — copy an entry into `rules`/`urlRules` (and adjust the browser id to one you actually have installed) to turn it on.",
+    "_examples": {
+      "rules": [
+        { "match": ["slack", "whatsapp"], "browser": "brave-browser.desktop" },
+        { "match": ["title:^(.*Microsoft Teams.*)$"], "browser": "firefox.desktop" }
+      ],
+      "urlRules": [
+        { "match": ["facebook\\.com"], "browser": "brave-browser.desktop" }
+      ]
+    },
     "enabled": true,
     "default": $d,
-    "rules": $rules,
-    "urlRules": $urlRules
+    "rules": [],
+    "urlRules": []
   }' >"$CONFIG_FILE"
 
-  log "ensure_config: wrote starter config (default=$current_default, seeded rule=$([[ $rules == "[]" ]] && echo no || echo yes))"
+  log "ensure_config: wrote starter config (default=$current_default, rules/urlRules empty, _examples included)"
 }
 
 # Fill class/initialClass/title (one per line) for whichever window a link
