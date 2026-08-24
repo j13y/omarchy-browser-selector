@@ -2,6 +2,7 @@
   "enabled": true,
   "default": "chromium.desktop",
   "rules": [
-    { "match": ["slack", "whatsapp"], "browser": "brave-browser.desktop" }
+    { "match": ["slack", "whatsapp"], "browser": "brave-browser.desktop" },
+    { "match": ["title:^(.*Microsoft Teams.*)$"], "browser": "firefox.desktop" }
   ]
 }

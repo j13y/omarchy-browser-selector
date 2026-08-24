@@ -30,9 +30,8 @@ if [[ $enabled != "true" ]]; then
 else
   mapfile -t win < <(get_active_window)
   class="${win[0]:-}"; initial="${win[1]:-}"; title="${win[2]:-}"
-  hay="$(printf '%s\x1f%s\x1f%s' "$class" "$initial" "$title" | tr '[:upper:]' '[:lower:]')"
 
-  target=$(match_rule "$cfg" "$hay") || target=""
+  target=$(match_rule "$cfg" "$class" "$initial" "$title") || target=""
   if [[ -n $target ]]; then
     reason="matched source '$class'/'$initial'"
   else
