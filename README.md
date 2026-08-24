@@ -91,16 +91,42 @@ up with a class like `chrome-web.whatsapp.com__-Default`, which a `"match":
 omarchy plugin add <git-url> --enable
 ```
 
-**For local development**, symlink this checkout into the plugins folder so
-edits take effect immediately (the shell watches that directory):
+### Run it locally
 
-```
+Symlink this checkout into the plugins folder — instead of a git-cloned
+copy — so edits here take effect immediately (the shell watches that
+directory for changes):
+
+```bash
 ln -s /home/j13y/Work/omarchy_browser_selector ~/.config/omarchy/plugins/j13y.browser-selector
 omarchy-shell shell rescanPlugins
 omarchy plugin enable j13y.browser-selector
 ```
 
-Either way, enabling the plugin runs `bin/browser-selector-install`, which:
+That last command is the one that actually changes something on your
+system: enabling loads `Service.qml`, which runs
+`bin/browser-selector-install` automatically (see below) — from that point
+on, all http/https link clicks system-wide go through this plugin's
+routing instead of straight to your old default browser.
+
+You should see a new `⇄` icon appear in the bar (right section). Verify it
+actually took:
+
+```bash
+xdg-mime query default x-scheme-handler/https   # should print omarchy-browser-selector.desktop
+bin/browser-selector-status                     # current enabled/default/rule count
+tail -f ~/.local/state/omarchy-browser-selector/dispatch.log   # watch it work as you click links
+```
+
+To back out:
+
+```bash
+~/.config/omarchy/plugins/j13y.browser-selector/bin/browser-selector-uninstall
+omarchy plugin disable j13y.browser-selector
+```
+
+Either way (local symlink or a real `plugin add`), enabling the plugin runs
+`bin/browser-selector-install`, which:
 
 1. Writes `~/.local/share/applications/omarchy-browser-selector.desktop`.
 2. Runs `xdg-mime default omarchy-browser-selector.desktop
