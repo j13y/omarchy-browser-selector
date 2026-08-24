@@ -1,0 +1,22 @@
+#!/bin/bash
+# Debug helper for writing rules: shows what a link click *right now* would
+# be attributed to, plus every window's class so you can pick good `match`
+# substrings without guessing.
+set -euo pipefail
+
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib.sh
+source "$SELF_DIR/lib.sh"
+
+mapfile -t win < <(get_active_window)
+echo "A link clicked right now would be attributed to:"
+printf '  class:         %s\n  initialClass:  %s\n  title:         %s\n' \
+  "${win[0]:-<none>}" "${win[1]:-<none>}" "${win[2]:-}"
+echo
+
+if command -v hyprctl >/dev/null 2>&1; then
+  echo "All windows currently open (class | initialClass | title):"
+  hyprctl clients -j | jq -r '.[] | "  \(.class) | \(.initialClass) | \(.title)"'
+else
+  echo "hyprctl not found — only the process-tree fallback is available here."
+fi

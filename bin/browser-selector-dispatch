@@ -1,0 +1,45 @@
+#!/bin/bash
+# The whole point of this plugin: registered as the default handler for
+# x-scheme-handler/http and /https (see browser-selector-install), so this
+# is what actually runs whenever any app opens a link. Figures out which
+# browser should handle it and hands it off, then gets out of the way.
+set -uo pipefail
+
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib.sh
+source "$SELF_DIR/lib.sh"
+
+url="${1:-}"
+if [[ -z $url ]]; then
+  log "dispatch: invoked with no URL, nothing to do"
+  exit 0
+fi
+
+ensure_config
+cfg="$(cat "$CONFIG_FILE" 2>/dev/null)"
+[[ -n $cfg ]] || cfg="{}"
+
+enabled=$(jq -r 'if (.enabled | type) == "boolean" then .enabled else true end' <<<"$cfg")
+default_browser=$(jq -r '.default // empty' <<<"$cfg")
+
+target="" reason="" class="" initial="" title=""
+
+if [[ $enabled != "true" ]]; then
+  reason="routing paused"
+  target="$default_browser"
+else
+  mapfile -t win < <(get_active_window)
+  class="${win[0]:-}"; initial="${win[1]:-}"; title="${win[2]:-}"
+  hay="$(printf '%s\x1f%s\x1f%s' "$class" "$initial" "$title" | tr '[:upper:]' '[:lower:]')"
+
+  target=$(match_rule "$cfg" "$hay") || target=""
+  if [[ -n $target ]]; then
+    reason="matched source '$class'/'$initial'"
+  else
+    reason="no rule matched source '$class'/'$initial'"
+    target="$default_browser"
+  fi
+fi
+
+log "url=$url source_class=$class source_initial=$initial reason=$reason target=${target:-<none>}"
+launch_browser "$target" "$url"

@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "j13y.browser-selector",
+  "name": "Browser Selector",
+  "version": "1.0.0",
+  "author": "j13y",
+  "license": "MIT",
+  "description": "Routes link clicks to different browsers depending on which app you clicked them from (e.g. Slack and WhatsApp links open in Brave, everything else opens in your default browser).",
+  "kinds": ["service", "bar-widget"],
+  "entryPoints": {
+    "service": "Service.qml",
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Browser Selector",
+    "description": "Pause/resume smart link routing and jump to the rules file.",
+    "category": "Network",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}

@@ -1,0 +1,29 @@
+#!/bin/bash
+# Reverts the http/https handler back to whatever "default" points at in the
+# config, and removes our .desktop file. Pass --purge to also delete the
+# config and logs; without it they're left in place so re-installing later
+# picks the same rules back up.
+set -euo pipefail
+
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib.sh
+source "$SELF_DIR/lib.sh"
+
+fallback=""
+[[ -f $CONFIG_FILE ]] && fallback=$(jq -r '.default // empty' "$CONFIG_FILE" 2>/dev/null)
+
+if [[ -n $fallback ]]; then
+  xdg-mime default "$fallback" x-scheme-handler/http x-scheme-handler/https || true
+  log "uninstall: restored http/https handler to $fallback"
+fi
+
+rm -f "$DESKTOP_FILE"
+command -v update-desktop-database >/dev/null 2>&1 &&
+  update-desktop-database "$(dirname "$DESKTOP_FILE")" >/dev/null 2>&1
+
+echo "Browser Selector uninstalled; http/https now open in ${fallback:-<unchanged>}."
+
+if [[ "${1:-}" == "--purge" ]]; then
+  rm -rf "$CONFIG_DIR" "$STATE_DIR"
+  echo "Removed configuration and logs."
+fi
