@@ -34,20 +34,37 @@ The pieces:
 
 Config lives at `~/.config/omarchy-browser-selector/config.json` (created
 on first run, outside the plugin's own folder so `omarchy plugin
-update`/`remove` never touches it). See `config.example.json`:
+update`/`remove` never touches it). Nothing routes anywhere until you turn
+it on — a freshly generated config has empty `rules`/`urlRules` plus an
+inert `_examples` block to copy from (see `config.example.json`, which is
+exactly what a fresh install looks like):
 
 ```json
 {
+  "_examples": {
+    "rules": [
+      { "match": ["slack", "whatsapp"], "browser": "brave-browser.desktop" },
+      { "match": ["title:^(.*Microsoft Teams.*)$"], "browser": "firefox.desktop" }
+    ],
+    "urlRules": [
+      { "match": ["facebook\\.com"], "browser": "brave-browser.desktop" }
+    ]
+  },
   "enabled": true,
   "default": "chromium.desktop",
-  "rules": [
-    { "match": ["slack", "whatsapp"], "browser": "brave-browser.desktop" },
-    { "match": ["title:^(.*Microsoft Teams.*)$"], "browser": "firefox.desktop" }
-  ],
-  "urlRules": [
-    { "match": ["facebook\\.com"], "browser": "brave-browser.desktop" }
-  ]
+  "rules": [],
+  "urlRules": []
 }
+```
+
+`_examples` is never read by the matcher — it's documentation. To actually
+enable a rule, copy an entry out of it into `rules` or `urlRules` (and
+point `browser` at a `.desktop` id you actually have installed), e.g.:
+
+```json
+"rules": [
+  { "match": ["slack", "whatsapp"], "browser": "brave-browser.desktop" }
+]
 ```
 
 - `default` — a `.desktop` file id, used when no rule matches (or routing
