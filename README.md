@@ -41,7 +41,8 @@ update`/`remove` never touches it). See `config.example.json`:
   "enabled": true,
   "default": "chromium.desktop",
   "rules": [
-    { "match": ["slack", "whatsapp"], "browser": "brave-browser.desktop" }
+    { "match": ["slack", "whatsapp"], "browser": "brave-browser.desktop" },
+    { "match": ["title:^(.*Microsoft Teams.*)$"], "browser": "firefox.desktop" }
   ]
 }
 ```
@@ -49,11 +50,31 @@ update`/`remove` never touches it). See `config.example.json`:
 - `default` — a `.desktop` file id, used when no rule matches (or routing
   is paused). Seeded from whatever your actual default browser is at
   install time.
-- `rules` — evaluated in order, first match wins. `match` is a list of
-  case-insensitive substrings checked against the focused window's
-  `class`, `initialClass`, and `title`. `browser` is a `.desktop` file id.
+- `rules` — evaluated in order, first match wins. `browser` is a `.desktop`
+  file id. `match` is a list of patterns checked against the focused
+  window; a plain word like `"slack"` is itself a valid regex, so simple
+  cases still read like substring matching.
 - `enabled` — smart routing on/off. Also toggleable from the bar panel.
   When off, every link goes to `default`.
+
+### Match patterns
+
+Patterns are **POSIX extended regex** (the same flavor as `grep -E`),
+matched **case-insensitively**, tried against the focused window's
+`class`, `initialClass`, and `title`. A bare pattern is tried against all
+three; prefix it with a field name to anchor it to just one:
+
+| Prefix           | Field checked  |
+|------------------|----------------|
+| `class:...`      | `class`        |
+| `initialclass:...` (or `initial:...`) | `initialClass` |
+| `title:...`      | `title`        |
+| *(none)*         | all three      |
+
+So `"title:^(.*Microsoft Teams.*)$"` only matches on window title, while
+`"whatsapp"` matches if *any* of the three fields contains "whatsapp"
+anywhere. A malformed regex just never matches (bash logs a warning, it
+won't crash the dispatcher).
 
 Run `bin/browser-selector-list-windows` to see what class/title a link
 click right now would be attributed to, and what every open window's class

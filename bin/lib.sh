@@ -155,20 +155,46 @@ get_active_window() {
 }
 
 # Echo the browser id of the first rule in $1 (a JSON config) whose `match`
-# patterns hit $2 (a pre-lowercased haystack). Empty output = no match.
+# patterns hit the focused window described by $2 (class), $3
+# (initialClass), $4 (title). Empty output = no match.
+#
+# Patterns are POSIX extended regex (the `grep -E` flavor bash's `=~` uses),
+# matched case-insensitively. A pattern may be field-qualified —
+# "class:...", "initialclass:..." (or "initial:..."), "title:..." — to
+# anchor it to one field; an unqualified pattern is tried against all
+# three. A malformed regex just never matches (bash prints a warning to
+# stderr but doesn't abort).
 match_rule() {
-  local cfg="$1" hay="$2" count i browser pat
+  local cfg="$1" win_class="$2" win_initial="$3" win_title="$4"
+  local count i browser pat field re hit=0
   count=$(jq '(.rules // []) | length' <<<"$cfg" 2>/dev/null) || return 1
+  shopt -s nocasematch
   for ((i = 0; i < count; i++)); do
     browser=$(jq -r --argjson i "$i" '.rules[$i].browser // empty' <<<"$cfg")
     [[ -n $browser ]] || continue
     while IFS= read -r pat; do
-      pat="${pat,,}"
-      if [[ -n $pat && $hay == *"$pat"* ]]; then
+      [[ -n $pat ]] || continue
+      case "$pat" in
+        class:*) field=class; re="${pat#class:}" ;;
+        initialclass:*) field=initial; re="${pat#initialclass:}" ;;
+        initial:*) field=initial; re="${pat#initial:}" ;;
+        title:*) field=title; re="${pat#title:}" ;;
+        *) field=any; re="$pat" ;;
+      esac
+      hit=0
+      case "$field" in
+        class)   [[ $win_class   =~ $re ]] && hit=1 ;;
+        initial) [[ $win_initial =~ $re ]] && hit=1 ;;
+        title)   [[ $win_title   =~ $re ]] && hit=1 ;;
+        any)     [[ $win_class =~ $re || $win_initial =~ $re || $win_title =~ $re ]] && hit=1 ;;
+      esac
+      if [[ $hit == 1 ]]; then
         printf '%s' "$browser"
+        shopt -u nocasematch
         return 0
       fi
     done < <(jq -r --argjson i "$i" '.rules[$i].match[]? // empty' <<<"$cfg")
   done
+  shopt -u nocasematch
   return 1
 }
