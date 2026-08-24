@@ -42,7 +42,10 @@ BarWidget {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: "⇄"
+    // nf-fa-globe (U+F0AC). Picked over a plain unicode arrow because it
+    // reads instantly as "browser/web" — rendered and visually checked in
+    // JetBrainsMono Nerd Font (the shell's default) before committing to it.
+    text: ""
     horizontalMargin: 8.75
     onPressed: function(b) { root.togglePanel() }
   }
