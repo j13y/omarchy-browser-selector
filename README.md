@@ -184,6 +184,26 @@ bin/browser-selector-uninstall          # restores the http/https handler to `de
 bin/browser-selector-uninstall --purge  # also deletes config + logs
 ```
 
+## Showing/hiding the bar icon
+
+Enabling the plugin (`omarchy plugin enable j13y.browser-selector`) shows
+the `⇄` bar icon by default, and it stays shown across restarts until you
+say otherwise — Omarchy remembers plugin-enabled state the same way it
+does for every other plugin. To hide just the icon without touching
+routing:
+
+```bash
+omarchy plugin disable j13y.browser-selector   # hides the bar icon
+omarchy plugin enable  j13y.browser-selector   # shows it again
+```
+
+Routing keeps working either way — `bin/browser-selector-dispatch` is a
+standalone script already registered via `xdg-mime`, independent of
+whether the bar icon (or `omarchy-shell` at all) is running. Disabling the
+plugin only removes the icon and stops the one-time install check
+`Service.qml` runs on load; it doesn't touch the `xdg-mime` association or
+your rules.
+
 ## Debugging
 
 - Log: `~/.local/state/omarchy-browser-selector/dispatch.log` — one line
