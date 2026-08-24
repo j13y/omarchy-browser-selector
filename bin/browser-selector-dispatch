@@ -33,10 +33,15 @@ else
 
   target=$(match_rule "$cfg" "$class" "$initial" "$title") || target=""
   if [[ -n $target ]]; then
-    reason="matched source '$class'/'$initial'"
+    reason="matched app rule (source '$class'/'$initial')"
   else
-    reason="no rule matched source '$class'/'$initial'"
-    target="$default_browser"
+    target=$(match_url_rule "$cfg" "$url") || target=""
+    if [[ -n $target ]]; then
+      reason="matched url rule"
+    else
+      reason="no rule matched source '$class'/'$initial'"
+      target="$default_browser"
+    fi
   fi
 fi
 

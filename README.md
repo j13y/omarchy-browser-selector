@@ -43,6 +43,9 @@ update`/`remove` never touches it). See `config.example.json`:
   "rules": [
     { "match": ["slack", "whatsapp"], "browser": "brave-browser.desktop" },
     { "match": ["title:^(.*Microsoft Teams.*)$"], "browser": "firefox.desktop" }
+  ],
+  "urlRules": [
+    { "match": ["facebook\\.com"], "browser": "brave-browser.desktop" }
   ]
 }
 ```
@@ -50,12 +53,22 @@ update`/`remove` never touches it). See `config.example.json`:
 - `default` — a `.desktop` file id, used when no rule matches (or routing
   is paused). Seeded from whatever your actual default browser is at
   install time.
-- `rules` — evaluated in order, first match wins. `browser` is a `.desktop`
-  file id. `match` is a list of patterns checked against the focused
-  window; a plain word like `"slack"` is itself a valid regex, so simple
-  cases still read like substring matching.
+- `rules` — matched against the **app you clicked the link in** (its
+  window's class/initialClass/title). Evaluated first; first match wins.
+- `urlRules` — matched against the **link itself** (its full URL, e.g.
+  `https://www.facebook.com/...`). Only consulted when no `rules` entry
+  matched — so an app rule always overrides a url rule for the same link.
+  This is what to use for "links to this site always open in X, regardless
+  of where they were clicked".
+- Both lists share the same shape (`match` + `browser`) and pattern syntax
+  (below); `browser` is a `.desktop` file id, and a plain word like
+  `"slack"` is itself a valid regex, so simple cases still read like
+  substring matching.
 - `enabled` — smart routing on/off. Also toggleable from the bar panel.
-  When off, every link goes to `default`.
+  When off, every link goes to `default`, skipping both rule lists.
+
+**Precedence, in order:** paused (`enabled: false`) → matching `rules`
+entry → matching `urlRules` entry → `default`.
 
 ### Match patterns
 
@@ -75,6 +88,14 @@ So `"title:^(.*Microsoft Teams.*)$"` only matches on window title, while
 `"whatsapp"` matches if *any* of the three fields contains "whatsapp"
 anywhere. A malformed regex just never matches (bash logs a warning, it
 won't crash the dispatcher).
+
+`urlRules` patterns are the same regex/case-insensitivity, but matched
+against the URL as a whole — no field prefix needed (an optional `url:`
+prefix is accepted for symmetry, but plain patterns work the same). Escape
+dots (`facebook\.com`, not `facebook.com`) if you want to avoid an
+unescaped `.` accidentally matching any character; anchor to the host
+(`^https?://([^/]*\.)?facebook\.com(/|$)`) if a URL merely *containing*
+"facebook.com" somewhere in its path shouldn't count.
 
 Run `bin/browser-selector-list-windows` to see what class/title a link
 click right now would be attributed to, and what every open window's class
