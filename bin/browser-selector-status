@@ -12,5 +12,6 @@ jq -c --arg p "$CONFIG_FILE" '{
   enabled: (if (.enabled | type) == "boolean" then .enabled else true end),
   default: (.default // ""),
   rulesCount: ((.rules // []) | length),
+  urlRulesCount: ((.urlRules // []) | length),
   configPath: $p
 }' "$CONFIG_FILE"

@@ -99,20 +99,31 @@ ensure_config() {
   mkdir -p "$CONFIG_DIR"
   [[ -f $CONFIG_FILE ]] && return 0
 
-  local current_default
+  local current_default candidate
   current_default=$(xdg-mime query default x-scheme-handler/https 2>/dev/null)
-  [[ -n $current_default ]] || current_default="chromium.desktop"
-
-  local rules="[]"
-  if find_desktop_file brave-browser.desktop >/dev/null 2>&1; then
-    rules='[{"match":["slack","whatsapp"],"browser":"brave-browser.desktop"}]'
+  # If we're already the registered handler (config got deleted after
+  # install, or this is a reinstall over a stale state) capturing that
+  # as "default" would make dispatch launch itself forever. Fall back to
+  # a known real browser instead.
+  if [[ -z $current_default || $current_default == "$DESKTOP_ID" ]]; then
+    current_default="chromium.desktop"
+    for candidate in "${KNOWN_BROWSER_IDS[@]}"; do
+      find_desktop_file "$candidate" >/dev/null 2>&1 && { current_default="$candidate"; break; }
+    done
   fi
 
-  jq -n --arg d "$current_default" --argjson rules "$rules" '{
-    "_readme": "See README.md. `default` is the fallback browser (a .desktop id). Each rule in `rules` has `match` (case-insensitive substrings checked against the focused window'\''s class/title when the link is clicked) and `browser` (a .desktop id). First matching rule wins.",
+  local rules="[]" url_rules="[]"
+  if find_desktop_file brave-browser.desktop >/dev/null 2>&1; then
+    rules='[{"match":["slack","whatsapp"],"browser":"brave-browser.desktop"}]'
+    url_rules='[{"match":["facebook\\.com"],"browser":"brave-browser.desktop"}]'
+  fi
+
+  jq -n --arg d "$current_default" --argjson rules "$rules" --argjson urlRules "$url_rules" '{
+    "_readme": "See README.md. `default` is the fallback browser (a .desktop id). `rules` match the focused *app* window (class/initialClass/title); `urlRules` match the *link itself* (its full URL) and only apply when no app rule matched — so an app rule always overrides a url rule for the same link. Both are regex, case-insensitive, first match wins within each list.",
     "enabled": true,
     "default": $d,
-    "rules": $rules
+    "rules": $rules,
+    "urlRules": $urlRules
   }' >"$CONFIG_FILE"
 
   log "ensure_config: wrote starter config (default=$current_default, seeded rule=$([[ $rules == "[]" ]] && echo no || echo yes))"
@@ -194,6 +205,38 @@ match_rule() {
         return 0
       fi
     done < <(jq -r --argjson i "$i" '.rules[$i].match[]? // empty' <<<"$cfg")
+  done
+  shopt -u nocasematch
+  return 1
+}
+
+# Echo the browser id of the first rule in $1's `urlRules` whose pattern
+# matches $2 (the full URL being opened). Same regex flavor and
+# case-insensitivity as match_rule; an optional leading "url:" prefix is
+# accepted and stripped for symmetry with match_rule's field prefixes, but
+# isn't required since there's only one field here. Empty output = no
+# match. Callers should only consult this once match_rule has already come
+# up empty, so an app-specific rule always wins over a url rule for the
+# same link.
+match_url_rule() {
+  local cfg="$1" url="$2" count i browser pat re
+  count=$(jq '(.urlRules // []) | length' <<<"$cfg" 2>/dev/null) || return 1
+  shopt -s nocasematch
+  for ((i = 0; i < count; i++)); do
+    browser=$(jq -r --argjson i "$i" '.urlRules[$i].browser // empty' <<<"$cfg")
+    [[ -n $browser ]] || continue
+    while IFS= read -r pat; do
+      [[ -n $pat ]] || continue
+      case "$pat" in
+        url:*) re="${pat#url:}" ;;
+        *) re="$pat" ;;
+      esac
+      if [[ $url =~ $re ]]; then
+        printf '%s' "$browser"
+        shopt -u nocasematch
+        return 0
+      fi
+    done < <(jq -r --argjson i "$i" '.urlRules[$i].match[]? // empty' <<<"$cfg")
   done
   shopt -u nocasematch
   return 1

@@ -23,6 +23,7 @@ Panel {
   property bool routingEnabled: true
   property string defaultBrowser: ""
   property int rulesCount: 0
+  property int urlRulesCount: 0
   property string configPath: ""
   property bool busy: false
 
@@ -68,6 +69,7 @@ Panel {
           root.routingEnabled = data.enabled !== false
           root.defaultBrowser = String(data.default || "")
           root.rulesCount = Number(data.rulesCount || 0)
+          root.urlRulesCount = Number(data.urlRulesCount || 0)
           root.configPath = String(data.configPath || "")
         } catch (e) {
           console.warn("browser-selector: could not parse status:", e)
@@ -139,17 +141,21 @@ Panel {
         color: Qt.darker(root.contentForeground, 1.4)
         font.family: root.contentFontFamily
         font.pixelSize: Style.font.bodySmall
-        text: root.routingEnabled
-          ? (root.rulesCount > 0
-              ? root.rulesCount + " rule(s) configured — everything else opens in " + root.defaultBrowser
-              : "No rules yet — everything opens in " + root.defaultBrowser)
-          : "Paused — everything opens in " + root.defaultBrowser
+        text: {
+          if (!root.routingEnabled) return "Paused — everything opens in " + root.defaultBrowser
+          if (root.rulesCount === 0 && root.urlRulesCount === 0)
+            return "No rules yet — everything opens in " + root.defaultBrowser
+          var parts = []
+          if (root.rulesCount > 0) parts.push(root.rulesCount + " app rule(s)")
+          if (root.urlRulesCount > 0) parts.push(root.urlRulesCount + " url rule(s)")
+          return parts.join(", ") + " — else opens in " + root.defaultBrowser
+        }
       }
 
       PanelSeparator { foreground: root.contentForeground }
 
       Button {
-        text: "Edit rules…"
+        text: "Edit rules"
         foreground: root.contentForeground
         bordered: true
         onClicked: root.editConfig()
