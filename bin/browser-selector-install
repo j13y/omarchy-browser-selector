@@ -1,0 +1,36 @@
+#!/bin/bash
+# Idempotent setup: creates the config (if missing), registers this plugin's
+# dispatch script as the default handler for http/https links, and leaves
+# everything else about the system untouched. Safe to re-run (e.g. on every
+# plugin enable, or after `omarchy plugin update`).
+set -euo pipefail
+
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PLUGIN_DIR="$(cd "$SELF_DIR/.." && pwd)"
+# shellcheck source=lib.sh
+source "$SELF_DIR/lib.sh"
+
+# Capture the pre-existing default *before* we overwrite it.
+ensure_config
+
+mkdir -p "$(dirname "$DESKTOP_FILE")"
+cat >"$DESKTOP_FILE" <<EOF
+[Desktop Entry]
+Type=Application
+Name=Browser Selector
+Comment=Routes link clicks to a browser chosen by which app you clicked them from
+Exec=$PLUGIN_DIR/bin/browser-selector-dispatch %u
+Terminal=false
+NoDisplay=true
+MimeType=x-scheme-handler/http;x-scheme-handler/https;
+EOF
+
+command -v update-desktop-database >/dev/null 2>&1 &&
+  update-desktop-database "$(dirname "$DESKTOP_FILE")" >/dev/null 2>&1
+
+xdg-mime default "$DESKTOP_ID" x-scheme-handler/http x-scheme-handler/https
+
+log "install: registered $DESKTOP_FILE as the http/https handler"
+echo "Browser Selector is now the default handler for http/https links."
+echo "Rules: $CONFIG_FILE"
+echo "Log:   $LOG_FILE"

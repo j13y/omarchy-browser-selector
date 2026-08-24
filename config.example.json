@@ -1,0 +1,7 @@
+{
+  "enabled": true,
+  "default": "chromium.desktop",
+  "rules": [
+    { "match": ["slack", "whatsapp"], "browser": "brave-browser.desktop" }
+  ]
+}

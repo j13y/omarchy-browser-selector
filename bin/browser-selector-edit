@@ -1,0 +1,20 @@
+#!/bin/bash
+# Opens the config file in the user's editor: a floating terminal running
+# $VISUAL/$EDITOR when the Omarchy helper for that is available, falling
+# back to xdg-open (whatever GUI app is associated with .json) elsewhere.
+set -euo pipefail
+
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib.sh
+source "$SELF_DIR/lib.sh"
+
+ensure_config
+editor="${VISUAL:-${EDITOR:-nano}}"
+
+if command -v omarchy-launch-floating-terminal-with-presentation >/dev/null 2>&1; then
+  exec omarchy-launch-floating-terminal-with-presentation "$editor $(printf '%q' "$CONFIG_FILE")"
+elif command -v xdg-open >/dev/null 2>&1; then
+  exec xdg-open "$CONFIG_FILE"
+else
+  exec "$editor" "$CONFIG_FILE"
+fi

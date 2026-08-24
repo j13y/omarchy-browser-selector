@@ -1,0 +1,16 @@
+#!/bin/bash
+# Flips `enabled` (smart routing on/off) and prints the new value ("true" or
+# "false"). When disabled, every link goes to `default` regardless of rules —
+# a quick pause, not an uninstall.
+set -euo pipefail
+
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib.sh
+source "$SELF_DIR/lib.sh"
+
+ensure_config
+tmp="$(mktemp "$CONFIG_DIR/.config.json.XXXXXX")"
+jq '.enabled = ((if (.enabled | type) == "boolean" then .enabled else true end) | not)' "$CONFIG_FILE" >"$tmp" && mv "$tmp" "$CONFIG_FILE"
+new=$(jq -r '.enabled' "$CONFIG_FILE")
+log "toggle: enabled=$new"
+printf '%s' "$new"

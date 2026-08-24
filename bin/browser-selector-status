@@ -1,0 +1,16 @@
+#!/bin/bash
+# Prints one line of JSON describing current state, for the bar panel (and
+# for humans: `browser-selector-status | jq .`).
+set -euo pipefail
+
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib.sh
+source "$SELF_DIR/lib.sh"
+
+ensure_config
+jq -c --arg p "$CONFIG_FILE" '{
+  enabled: (if (.enabled | type) == "boolean" then .enabled else true end),
+  default: (.default // ""),
+  rulesCount: ((.rules // []) | length),
+  configPath: $p
+}' "$CONFIG_FILE"
