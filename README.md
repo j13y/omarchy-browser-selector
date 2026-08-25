@@ -123,10 +123,10 @@ up with a class like `chrome-web.whatsapp.com__-Default`, which a `"match":
 
 ## Install
 
-**As a proper Omarchy plugin** (once pushed to a git remote):
+**As a proper Omarchy plugin:**
 
 ```
-omarchy plugin add <git-url> --enable
+omarchy plugin add https://github.com/j13y/omarchy-browser-selector --enable
 ```
 
 ### Run it locally
