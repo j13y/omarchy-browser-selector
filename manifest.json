@@ -5,7 +5,7 @@
   "version": "1.0.0",
   "author": "j13y",
   "license": "MIT",
-  "description": "Routes link clicks to different browsers depending on which app you clicked them from (e.g. Slack and WhatsApp links open in Brave, everything else opens in your default browser).",
+  "description": "Choosy-style link router: opens each link in a browser chosen by which app you clicked it from.",
   "kinds": ["service", "bar-widget"],
   "entryPoints": {
     "service": "Service.qml",
