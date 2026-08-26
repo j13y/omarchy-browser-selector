@@ -9,6 +9,12 @@ LOG_FILE="$STATE_DIR/dispatch.log"
 DESKTOP_ID="omarchy-browser-selector.desktop"
 DESKTOP_FILE="$HOME/.local/share/applications/$DESKTOP_ID"
 
+# A real config.json is at most a few KB even with a long rule list. Refuse
+# to read anything bigger — reading it fully into a bash variable (as
+# dispatch does, once per link click) is how a swapped-in oversized file
+# would balloon memory on every click.
+CONFIG_MAX_BYTES=$((1024 * 1024))
+
 # Browsers Omarchy knows how to install/set as default (see
 # omarchy-default-browser). Used as a last-resort search when a configured
 # browser can't be resolved.
@@ -17,9 +23,21 @@ KNOWN_BROWSER_IDS=(chromium.desktop google-chrome.desktop brave-browser.desktop 
 config_path() { printf '%s' "$CONFIG_FILE"; }
 
 log() {
-  mkdir -p "$STATE_DIR"
+  mkdir -p "$STATE_DIR" && chmod 700 "$STATE_DIR" 2>/dev/null
+
+  # The log records full URLs — which can carry query-string tokens/session
+  # ids — at a predictable path, so keep it private to us and never write
+  # through a symlink planted there: treat one as tampering and replace it
+  # with a fresh, private regular file instead of following it.
+  [[ -L $LOG_FILE ]] && rm -f "$LOG_FILE"
+  if [[ ! -e $LOG_FILE ]]; then
+    : >"$LOG_FILE"
+    chmod 600 "$LOG_FILE" 2>/dev/null
+  fi
+
   if [[ -f $LOG_FILE ]] && [[ $(wc -l <"$LOG_FILE") -gt 2000 ]]; then
     tail -n 500 "$LOG_FILE" >"$LOG_FILE.tmp" && mv "$LOG_FILE.tmp" "$LOG_FILE"
+    chmod 600 "$LOG_FILE" 2>/dev/null
   fi
   printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >>"$LOG_FILE"
 }
@@ -96,8 +114,17 @@ launch_browser() {
 # system default browser is before install() ever changes it, so "default"
 # always starts out meaning "what already worked".
 ensure_config() {
-  mkdir -p "$CONFIG_DIR"
+  mkdir -p "$CONFIG_DIR" && chmod 700 "$CONFIG_DIR" 2>/dev/null
   [[ -f $CONFIG_FILE ]] && return 0
+
+  # Something other than a plain regular file already sitting at the config
+  # path (a FIFO, device, or symlink to one) would make the write below
+  # block forever or land somewhere we don't control — refuse rather than
+  # touch it.
+  if [[ -e $CONFIG_FILE || -L $CONFIG_FILE ]]; then
+    log "ensure_config: $CONFIG_FILE exists but is not a regular file; refusing to write a starter config over it"
+    return 1
+  fi
 
   local current_default candidate
   current_default=$(xdg-mime query default x-scheme-handler/https 2>/dev/null)
@@ -131,9 +158,26 @@ ensure_config() {
     "default": $d,
     "rules": [],
     "urlRules": []
-  }' >"$CONFIG_FILE"
+  }' >"$CONFIG_FILE" && chmod 600 "$CONFIG_FILE" 2>/dev/null
 
   log "ensure_config: wrote starter config (default=$current_default, rules/urlRules empty, _examples included)"
+}
+
+# Read the config file into stdout, refusing anything that isn't a plain,
+# reasonably-sized regular file. A FIFO would make a plain `cat`/`jq` read
+# block forever waiting for a writer; an oversized file would be read
+# entirely into memory (dispatch does this on every single link click).
+# Prints nothing on any of those cases; callers should treat empty output
+# as "no config" and fall back to defaults.
+read_config() {
+  [[ -f $CONFIG_FILE ]] || return 1
+  local size
+  size=$(stat -c%s "$CONFIG_FILE" 2>/dev/null) || return 1
+  if [[ $size -gt $CONFIG_MAX_BYTES ]]; then
+    log "read_config: refusing to read $CONFIG_FILE ($size bytes, over ${CONFIG_MAX_BYTES}-byte cap)"
+    return 1
+  fi
+  cat "$CONFIG_FILE" 2>/dev/null
 }
 
 # Fill class/initialClass/title (one per line) for whichever window a link

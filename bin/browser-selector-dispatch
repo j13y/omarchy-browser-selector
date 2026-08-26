@@ -16,7 +16,7 @@ if [[ -z $url ]]; then
 fi
 
 ensure_config
-cfg="$(cat "$CONFIG_FILE" 2>/dev/null)"
+cfg="$(read_config)"
 [[ -n $cfg ]] || cfg="{}"
 
 enabled=$(jq -r 'if (.enabled | type) == "boolean" then .enabled else true end' <<<"$cfg")
