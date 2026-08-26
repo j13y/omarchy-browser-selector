@@ -10,7 +10,8 @@ SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SELF_DIR/lib.sh"
 
 fallback=""
-[[ -f $CONFIG_FILE ]] && fallback=$(jq -r '.default // empty' "$CONFIG_FILE" 2>/dev/null)
+cfg="$(read_config)"
+[[ -n $cfg ]] && fallback=$(jq -r '.default // empty' <<<"$cfg" 2>/dev/null)
 
 if [[ -n $fallback ]]; then
   xdg-mime default "$fallback" x-scheme-handler/http x-scheme-handler/https || true

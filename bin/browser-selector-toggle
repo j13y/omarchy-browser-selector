@@ -9,8 +9,10 @@ SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SELF_DIR/lib.sh"
 
 ensure_config
+cfg="$(read_config)"
+[[ -n $cfg ]] || cfg="{}"
 tmp="$(mktemp "$CONFIG_DIR/.config.json.XXXXXX")"
-jq '.enabled = ((if (.enabled | type) == "boolean" then .enabled else true end) | not)' "$CONFIG_FILE" >"$tmp" && mv "$tmp" "$CONFIG_FILE"
+jq '.enabled = ((if (.enabled | type) == "boolean" then .enabled else true end) | not)' <<<"$cfg" >"$tmp" && mv "$tmp" "$CONFIG_FILE"
 new=$(jq -r '.enabled' "$CONFIG_FILE")
 log "toggle: enabled=$new"
 printf '%s' "$new"
