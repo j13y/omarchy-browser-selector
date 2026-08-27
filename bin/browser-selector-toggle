@@ -13,6 +13,13 @@ cfg="$(read_config)"
 [[ -n $cfg ]] || cfg="{}"
 tmp="$(mktemp "$CONFIG_DIR/.config.json.XXXXXX")"
 jq '.enabled = ((if (.enabled | type) == "boolean" then .enabled else true end) | not)' <<<"$cfg" >"$tmp" && mv "$tmp" "$CONFIG_FILE"
-new=$(jq -r '.enabled' "$CONFIG_FILE")
+
+# Read the new value back through read_config rather than `jq ... "$CONFIG_FILE"`
+# directly: the mv above is an atomic rename so it can't itself be raced, but a
+# plain-pathname read one line later still would be — read_config checks/reads
+# through an already-open fd instead (see its comment in lib.sh).
+new_cfg="$(read_config)"
+[[ -n $new_cfg ]] || new_cfg="{}"
+new=$(jq -r '.enabled' <<<"$new_cfg")
 log "toggle: enabled=$new"
 printf '%s' "$new"
