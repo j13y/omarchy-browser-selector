@@ -35,37 +35,22 @@ log() {
     }
   fi
 
-  # The append below is what actually writes the URL (which can carry
-  # query-string tokens/session ids), so this is the one write that must
-  # never land through an attacker-planted symlink, and must never block
-  # forever on a FIFO (a plain O_WRONLY append open — what "$fd}>>" below
-  # does on its own — blocks until a reader shows up if what's actually
-  # there is a FIFO). Remove a symlink if present, then open read-write
-  # (O_RDWR never blocks, even on a FIFO) purely to check what's actually
-  # there through the *already-open* descriptor (/proc/self/fd) — immune
-  # to a pathname swap between check and use, unlike re-checking the
-  # pathname and reopening separately. Only once that's confirmed to be a
-  # regular file do we do the real append-mode open, back to back with
-  # nothing else running in between, and write through that. bash has no
-  # O_NOFOLLOW, so this can't close the window entirely, but this leaves
-  # as little as possible left to race against.
-  # (No stderr redirect on either exec: with no command word, bash applies
-  # exec's redirections to the shell itself, so a trailing "2>/dev/null"
-  # here wouldn't just silence *that* open attempt — it'd silence stderr
-  # for the rest of the calling script's lifetime, on every successful
-  # call, i.e. on every ordinary log line.)
+  # The append writes the URL (can carry query-string tokens/session ids),
+  # so it must never follow a symlink planted at $LOG_FILE or block on a
+  # FIFO. Open once, read-write (never blocks on a FIFO); everything below
+  # — regular-file check, chmod, the write itself — goes through that one
+  # fd via /proc/self/fd, never through $LOG_FILE again, so nothing can
+  # swap it out from under us. No stderr redirect on the bare exec: that
+  # would silence stderr for the rest of the script, not just this open.
   [[ -L $LOG_FILE ]] && rm -f "$LOG_FILE"
   local fd
   exec {fd}<>"$LOG_FILE" || return 0
   if [[ -f /proc/self/fd/$fd ]]; then
     chmod 600 "/proc/self/fd/$fd" 2>/dev/null
-    eval "exec $fd<&-"
-    exec {fd}>>"$LOG_FILE" || return 0
-    printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&"$fd"
-    eval "exec $fd>&-"
-  else
-    eval "exec $fd<&-"
+    printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" |
+      dd of="/proc/self/fd/$fd" oflag=append conv=notrunc status=none 2>/dev/null
   fi
+  eval "exec $fd<&-"
 }
 
 # Look up a .desktop file by id (e.g. "brave-browser.desktop") or accept an
@@ -199,21 +184,11 @@ read_config() {
   [[ -L $CONFIG_FILE ]] && return 1
   [[ -e $CONFIG_FILE ]] || return 1
 
-  # Open read-write, not read-only: if this path has been swapped for a
-  # FIFO, a plain read-only open blocks waiting for a writer that will
-  # never come (confirmed: that's exactly how the old check-then-`cat`
-  # sequence could hang dispatch forever). Opening O_RDWR on a FIFO always
-  # succeeds immediately instead — we still only ever read from it below.
-  # Every check from here on inspects the *already-open* descriptor (via
-  # /proc/self/fd), not the pathname, so what gets checked and what gets
-  # read are guaranteed to be the same object — nothing can swap
-  # $CONFIG_FILE out from under us between "checked" and "read" the way
-  # the previous check-by-path-then-reopen-with-cat could.
-  # (No stderr redirect on this exec: with no command word, bash applies
-  # exec's redirections to the shell itself, so a trailing "2>/dev/null"
-  # here wouldn't just silence *this* open attempt — it'd silence stderr
-  # for the rest of the calling script's lifetime, on every successful
-  # call.)
+  # Open read-write, not read-only, so a FIFO swapped in here can't block
+  # us waiting for a writer. Every check below inspects this already-open
+  # fd via /proc/self/fd, not the pathname, so what's checked and what's
+  # read are guaranteed the same object. No stderr redirect on the bare
+  # exec: that would silence stderr for the rest of the script.
   local fd size
   exec {fd}<>"$CONFIG_FILE" || return 1
 
