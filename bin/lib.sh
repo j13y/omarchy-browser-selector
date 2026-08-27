@@ -25,21 +25,47 @@ config_path() { printf '%s' "$CONFIG_FILE"; }
 log() {
   mkdir -p "$STATE_DIR" && chmod 700 "$STATE_DIR" 2>/dev/null
 
-  # The log records full URLs — which can carry query-string tokens/session
-  # ids — at a predictable path, so keep it private to us and never write
-  # through a symlink planted there: treat one as tampering and replace it
-  # with a fresh, private regular file instead of following it.
-  [[ -L $LOG_FILE ]] && rm -f "$LOG_FILE"
-  if [[ ! -e $LOG_FILE ]]; then
-    : >"$LOG_FILE"
-    chmod 600 "$LOG_FILE" 2>/dev/null
+  # Rotation only touches content we already own/wrote, never the new line
+  # about to be appended below — so a race here risks at worst a hung or
+  # skipped rotation, not a sensitive write landing somewhere unexpected.
+  if [[ -f $LOG_FILE && ! -L $LOG_FILE ]] && [[ $(wc -l <"$LOG_FILE" 2>/dev/null) -gt 2000 ]]; then
+    tail -n 500 "$LOG_FILE" >"$LOG_FILE.tmp" 2>/dev/null && {
+      chmod 600 "$LOG_FILE.tmp" 2>/dev/null
+      mv -f "$LOG_FILE.tmp" "$LOG_FILE"
+    }
   fi
 
-  if [[ -f $LOG_FILE ]] && [[ $(wc -l <"$LOG_FILE") -gt 2000 ]]; then
-    tail -n 500 "$LOG_FILE" >"$LOG_FILE.tmp" && mv "$LOG_FILE.tmp" "$LOG_FILE"
-    chmod 600 "$LOG_FILE" 2>/dev/null
+  # The append below is what actually writes the URL (which can carry
+  # query-string tokens/session ids), so this is the one write that must
+  # never land through an attacker-planted symlink, and must never block
+  # forever on a FIFO (a plain O_WRONLY append open — what "$fd}>>" below
+  # does on its own — blocks until a reader shows up if what's actually
+  # there is a FIFO). Remove a symlink if present, then open read-write
+  # (O_RDWR never blocks, even on a FIFO) purely to check what's actually
+  # there through the *already-open* descriptor (/proc/self/fd) — immune
+  # to a pathname swap between check and use, unlike re-checking the
+  # pathname and reopening separately. Only once that's confirmed to be a
+  # regular file do we do the real append-mode open, back to back with
+  # nothing else running in between, and write through that. bash has no
+  # O_NOFOLLOW, so this can't close the window entirely, but this leaves
+  # as little as possible left to race against.
+  # (No stderr redirect on either exec: with no command word, bash applies
+  # exec's redirections to the shell itself, so a trailing "2>/dev/null"
+  # here wouldn't just silence *that* open attempt — it'd silence stderr
+  # for the rest of the calling script's lifetime, on every successful
+  # call, i.e. on every ordinary log line.)
+  [[ -L $LOG_FILE ]] && rm -f "$LOG_FILE"
+  local fd
+  exec {fd}<>"$LOG_FILE" || return 0
+  if [[ -f /proc/self/fd/$fd ]]; then
+    chmod 600 "/proc/self/fd/$fd" 2>/dev/null
+    eval "exec $fd<&-"
+    exec {fd}>>"$LOG_FILE" || return 0
+    printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&"$fd"
+    eval "exec $fd>&-"
+  else
+    eval "exec $fd<&-"
   fi
-  printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >>"$LOG_FILE"
 }
 
 # Look up a .desktop file by id (e.g. "brave-browser.desktop") or accept an
@@ -170,14 +196,43 @@ ensure_config() {
 # Prints nothing on any of those cases; callers should treat empty output
 # as "no config" and fall back to defaults.
 read_config() {
-  [[ -f $CONFIG_FILE ]] || return 1
-  local size
-  size=$(stat -c%s "$CONFIG_FILE" 2>/dev/null) || return 1
-  if [[ $size -gt $CONFIG_MAX_BYTES ]]; then
-    log "read_config: refusing to read $CONFIG_FILE ($size bytes, over ${CONFIG_MAX_BYTES}-byte cap)"
+  [[ -L $CONFIG_FILE ]] && return 1
+  [[ -e $CONFIG_FILE ]] || return 1
+
+  # Open read-write, not read-only: if this path has been swapped for a
+  # FIFO, a plain read-only open blocks waiting for a writer that will
+  # never come (confirmed: that's exactly how the old check-then-`cat`
+  # sequence could hang dispatch forever). Opening O_RDWR on a FIFO always
+  # succeeds immediately instead — we still only ever read from it below.
+  # Every check from here on inspects the *already-open* descriptor (via
+  # /proc/self/fd), not the pathname, so what gets checked and what gets
+  # read are guaranteed to be the same object — nothing can swap
+  # $CONFIG_FILE out from under us between "checked" and "read" the way
+  # the previous check-by-path-then-reopen-with-cat could.
+  # (No stderr redirect on this exec: with no command word, bash applies
+  # exec's redirections to the shell itself, so a trailing "2>/dev/null"
+  # here wouldn't just silence *this* open attempt — it'd silence stderr
+  # for the rest of the calling script's lifetime, on every successful
+  # call.)
+  local fd size
+  exec {fd}<>"$CONFIG_FILE" || return 1
+
+  if [[ ! -f /proc/self/fd/$fd ]]; then
+    eval "exec $fd<&-"
     return 1
   fi
-  cat "$CONFIG_FILE" 2>/dev/null
+
+  # -L: dereference the /proc/self/fd magic symlink to stat the open file
+  # it refers to, not the ~60-byte symlink entry itself.
+  size=$(stat -L -c%s "/proc/self/fd/$fd" 2>/dev/null)
+  if [[ -z $size || $size -gt $CONFIG_MAX_BYTES ]]; then
+    [[ -n $size ]] && log "read_config: refusing to read $CONFIG_FILE ($size bytes, over ${CONFIG_MAX_BYTES}-byte cap)"
+    eval "exec $fd<&-"
+    return 1
+  fi
+
+  cat <&"$fd"
+  eval "exec $fd<&-"
 }
 
 # Fill class/initialClass/title (one per line) for whichever window a link
