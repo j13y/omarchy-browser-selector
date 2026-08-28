@@ -15,6 +15,13 @@ DESKTOP_FILE="$HOME/.local/share/applications/$DESKTOP_ID"
 # would balloon memory on every click.
 CONFIG_MAX_BYTES=$((1024 * 1024))
 
+# dispatch.log is kept to at most this many lines (see log() below) and
+# lines are short, so a legitimate log is well under this; refuse to read
+# anything bigger rather than pull an externally-grown file fully into
+# memory. Same purpose as CONFIG_MAX_BYTES above, just for the log.
+LOG_MAX_BYTES=$((2 * 1024 * 1024))
+LOG_MAX_LINES=2000
+
 # Browsers Omarchy knows how to install/set as default (see
 # omarchy-default-browser). Used as a last-resort search when a configured
 # browser can't be resolved.
@@ -22,35 +29,65 @@ KNOWN_BROWSER_IDS=(chromium.desktop google-chrome.desktop brave-browser.desktop 
 
 config_path() { printf '%s' "$CONFIG_FILE"; }
 
+# Read $1 into stdout, refusing anything that isn't a plain, regular file of
+# at most $2 bytes — without ever re-opening it by pathname after the
+# initial check. Opens read-write (O_RDWR never blocks on a FIFO, unlike a
+# read-only open); every check thereafter inspects that *already-open*
+# descriptor via /proc/self/fd, not the pathname, so what's checked and
+# what's read are guaranteed the same object. Prints nothing when refused
+# (missing, symlink, non-regular, oversized); callers should treat empty
+# output as "nothing there" and fall back accordingly.
+read_file_safe() {
+  local path="$1" max="$2" fd size
+  [[ -L $path ]] && return 1
+  [[ -e $path ]] || return 1
+
+  # No stderr redirect on this exec: with no command word, bash applies
+  # exec's redirections to the shell itself, so a trailing "2>/dev/null"
+  # here wouldn't just silence *this* open attempt — it'd silence stderr
+  # for the rest of the calling script's lifetime, on every successful call.
+  exec {fd}<>"$path" || return 1
+
+  if [[ ! -f /proc/self/fd/$fd ]]; then
+    eval "exec $fd<&-"
+    return 1
+  fi
+
+  # -L: dereference the /proc/self/fd magic symlink to stat the open file
+  # it refers to, not the ~60-byte symlink entry itself.
+  size=$(stat -L -c%s "/proc/self/fd/$fd" 2>/dev/null)
+  if [[ -z $size || $size -gt $max ]]; then
+    eval "exec $fd<&-"
+    return 1
+  fi
+
+  cat <&"$fd"
+  eval "exec $fd<&-"
+}
+
+# Appends one line to dispatch.log, trimmed to the last LOG_MAX_LINES lines.
+# The line can carry a full URL (query-string tokens/session ids included),
+# so — rather than trying to open $LOG_FILE itself for the write and defend
+# that open against a symlink swapped in at the last instant (bash has no
+# O_NOFOLLOW to rule that out) — this never opens $LOG_FILE for writing at
+# all: it composes the next version of the log in a freshly created temp
+# file (mktemp's O_EXCL guarantees a unique inode an attacker can't have
+# pre-positioned as a symlink) and atomically renames it over $LOG_FILE.
+# rename(2) replaces whatever is *at* that name — symlink included — rather
+# than writing through it, so there's no open-of-the-mutable-path for a
+# swap to race against in the first place.
 log() {
   mkdir -p "$STATE_DIR" && chmod 700 "$STATE_DIR" 2>/dev/null
 
-  # Rotation only touches content we already own/wrote, never the new line
-  # about to be appended below — so a race here risks at worst a hung or
-  # skipped rotation, not a sensitive write landing somewhere unexpected.
-  if [[ -f $LOG_FILE && ! -L $LOG_FILE ]] && [[ $(wc -l <"$LOG_FILE" 2>/dev/null) -gt 2000 ]]; then
-    tail -n 500 "$LOG_FILE" >"$LOG_FILE.tmp" 2>/dev/null && {
-      chmod 600 "$LOG_FILE.tmp" 2>/dev/null
-      mv -f "$LOG_FILE.tmp" "$LOG_FILE"
-    }
-  fi
-
-  # The append writes the URL (can carry query-string tokens/session ids),
-  # so it must never follow a symlink planted at $LOG_FILE or block on a
-  # FIFO. Open once, read-write (never blocks on a FIFO); everything below
-  # — regular-file check, chmod, the write itself — goes through that one
-  # fd via /proc/self/fd, never through $LOG_FILE again, so nothing can
-  # swap it out from under us. No stderr redirect on the bare exec: that
-  # would silence stderr for the rest of the script, not just this open.
-  [[ -L $LOG_FILE ]] && rm -f "$LOG_FILE"
-  local fd
-  exec {fd}<>"$LOG_FILE" || return 0
-  if [[ -f /proc/self/fd/$fd ]]; then
-    chmod 600 "/proc/self/fd/$fd" 2>/dev/null
-    printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" |
-      dd of="/proc/self/fd/$fd" oflag=append conv=notrunc status=none 2>/dev/null
-  fi
-  eval "exec $fd<&-"
+  local existing tmp
+  existing=$(read_file_safe "$LOG_FILE" "$LOG_MAX_BYTES")
+  tmp=$(mktemp "$STATE_DIR/.dispatch.log.XXXXXX") || return 0
+  {
+    [[ -n $existing ]] && printf '%s\n' "$existing"
+    printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
+  } | tail -n "$LOG_MAX_LINES" >"$tmp"
+  chmod 600 "$tmp" 2>/dev/null
+  mv -f "$tmp" "$LOG_FILE"
 }
 
 # Look up a .desktop file by id (e.g. "brave-browser.desktop") or accept an
@@ -174,40 +211,11 @@ ensure_config() {
   log "ensure_config: wrote starter config (default=$current_default, rules/urlRules empty, _examples included)"
 }
 
-# Read the config file into stdout, refusing anything that isn't a plain,
-# reasonably-sized regular file. A FIFO would make a plain `cat`/`jq` read
-# block forever waiting for a writer; an oversized file would be read
-# entirely into memory (dispatch does this on every single link click).
-# Prints nothing on any of those cases; callers should treat empty output
-# as "no config" and fall back to defaults.
+# Read the config file into stdout; see read_file_safe for exactly what's
+# refused and why. Prints nothing on any of those cases; callers should
+# treat empty output as "no config" and fall back to defaults.
 read_config() {
-  [[ -L $CONFIG_FILE ]] && return 1
-  [[ -e $CONFIG_FILE ]] || return 1
-
-  # Open read-write, not read-only, so a FIFO swapped in here can't block
-  # us waiting for a writer. Every check below inspects this already-open
-  # fd via /proc/self/fd, not the pathname, so what's checked and what's
-  # read are guaranteed the same object. No stderr redirect on the bare
-  # exec: that would silence stderr for the rest of the script.
-  local fd size
-  exec {fd}<>"$CONFIG_FILE" || return 1
-
-  if [[ ! -f /proc/self/fd/$fd ]]; then
-    eval "exec $fd<&-"
-    return 1
-  fi
-
-  # -L: dereference the /proc/self/fd magic symlink to stat the open file
-  # it refers to, not the ~60-byte symlink entry itself.
-  size=$(stat -L -c%s "/proc/self/fd/$fd" 2>/dev/null)
-  if [[ -z $size || $size -gt $CONFIG_MAX_BYTES ]]; then
-    [[ -n $size ]] && log "read_config: refusing to read $CONFIG_FILE ($size bytes, over ${CONFIG_MAX_BYTES}-byte cap)"
-    eval "exec $fd<&-"
-    return 1
-  fi
-
-  cat <&"$fd"
-  eval "exec $fd<&-"
+  read_file_safe "$CONFIG_FILE" "$CONFIG_MAX_BYTES"
 }
 
 # Fill class/initialClass/title (one per line) for whichever window a link
