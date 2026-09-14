@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "j13y.browser-selector",
   "name": "Browser Selector",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": "j13y",
   "license": "MIT",
   "description": "Choosy-style link router: opens each link in a browser chosen by which app you clicked it from.",
