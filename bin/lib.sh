@@ -6,6 +6,7 @@ CONFIG_DIR="$HOME/.config/omarchy-browser-selector"
 CONFIG_FILE="$CONFIG_DIR/config.json"
 STATE_DIR="$HOME/.local/state/omarchy-browser-selector"
 LOG_FILE="$STATE_DIR/dispatch.log"
+LOG_LOCK="$STATE_DIR/.dispatch.log.lock"
 DESKTOP_ID="omarchy-browser-selector.desktop"
 DESKTOP_FILE="$HOME/.local/share/applications/$DESKTOP_ID"
 
@@ -76,18 +77,43 @@ read_file_safe() {
 # rename(2) replaces whatever is *at* that name — symlink included — rather
 # than writing through it, so there's no open-of-the-mutable-path for a
 # swap to race against in the first place.
+#
+# That rename is atomic but the read-modify-write around it is not: every
+# caller reads the whole log, appends its own line, and renames its copy
+# over the top. Two dispatches racing (one link click can easily invoke us
+# more than once) would each start from the same snapshot and the second
+# rename would silently drop the first's line — which is exactly the kind
+# of evidence you need when you're chasing a "why did this fire twice?"
+# bug. So the whole sequence runs under an flock on a sidecar lock file,
+# leaving the symlink-safe temp+rename above intact while making the
+# read-modify-write actually serialised. The lock lives in $STATE_DIR,
+# which we keep at mode 700.
 log() {
   mkdir -p "$STATE_DIR" && chmod 700 "$STATE_DIR" 2>/dev/null
 
-  local existing tmp
+  local existing tmp lockfd=""
+  # Hold the lock across read+trim+rename. If anything about the lock is
+  # unusable, fall through and log anyway — a lost line beats a lost
+  # dispatch.
+  if [[ ! -L $LOG_LOCK ]] && exec {lockfd}>>"$LOG_LOCK" 2>/dev/null; then
+    chmod 600 "$LOG_LOCK" 2>/dev/null
+    flock -w 5 "$lockfd" 2>/dev/null || true
+  fi
+
   existing=$(read_file_safe "$LOG_FILE" "$LOG_MAX_BYTES")
-  tmp=$(mktemp "$STATE_DIR/.dispatch.log.XXXXXX") || return 0
+  tmp=$(mktemp "$STATE_DIR/.dispatch.log.XXXXXX") || {
+    [[ -n $lockfd ]] && eval "exec $lockfd>&-"
+    return 0
+  }
   {
     [[ -n $existing ]] && printf '%s\n' "$existing"
     printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
   } | tail -n "$LOG_MAX_LINES" >"$tmp"
   chmod 600 "$tmp" 2>/dev/null
   mv -f "$tmp" "$LOG_FILE"
+
+  [[ -n $lockfd ]] && eval "exec $lockfd>&-"
+  return 0
 }
 
 # Look up a .desktop file by id (e.g. "brave-browser.desktop") or accept an
