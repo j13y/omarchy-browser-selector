@@ -9,9 +9,31 @@ SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib.sh
 source "$SELF_DIR/lib.sh"
 
-url="${1:-}"
+# We are registered for x-scheme-handler/http(s), but we are not only ever
+# handed a bare URL. Anything that resolves "the default browser" and then
+# probes or drives it hands us argv meant for a real browser instead —
+# omarchy-launch-browser is the one that bites here: because xdg-settings
+# now reports *us* as the default browser, it runs `<us> --help` to sniff
+# which browser family it is talking to, and then re-invokes us with the
+# URL. Treating $1 as the URL unconditionally meant that --help probe got
+# forwarded to a real browser as if it were a link, so a single click
+# opened an extra browser window (and `--private <url>` opened a window for
+# the flag and dropped the URL entirely). Take the first genuine http(s)
+# argument as the URL and ignore everything else.
+url="" want_private=0
+for arg in "$@"; do
+  case "$arg" in
+    http://* | https://*) [[ -z $url ]] && url="$arg" ;;
+    # Private-window intent, in whichever spelling the caller guessed at.
+    # Normalised here and translated to the right flag for whichever
+    # browser we actually resolve, rather than forwarded verbatim.
+    --private | --private-window | --incognito | --inprivate) want_private=1 ;;
+    *) log "dispatch: ignoring non-URL argument '$arg'" ;;
+  esac
+done
+
 if [[ -z $url ]]; then
-  log "dispatch: invoked with no URL, nothing to do"
+  log "dispatch: invoked with no http(s) URL (args: $*), nothing to do"
   exit 0
 fi
 
@@ -46,4 +68,4 @@ else
 fi
 
 log "url=$url source_class=$class source_initial=$initial reason=$reason target=${target:-<none>}"
-launch_browser "$target" "$url"
+launch_browser "$target" "$url" "$want_private"
