@@ -152,11 +152,27 @@ build_argv() {
   done
 }
 
+# Which private-window flag a given browser binary wants. Callers normalise
+# every spelling of "open this privately" to a single intent (see
+# browser-selector-dispatch) and this turns it back into the one flag the
+# browser we actually resolved will accept — the caller's own guess can't be
+# trusted, since anything upstream that asked xdg-settings for "the default
+# browser" was told it was us, not the browser this link is really headed to.
+private_flag_for() {
+  local bin
+  bin=$(basename "$1")
+  case "$bin" in
+    firefox* | zen* | librewolf* | waterfox* | mozilla*) printf '%s' "--private-window" ;;
+    *edge*) printf '%s' "--inprivate" ;;
+    *) printf '%s' "--incognito" ;;
+  esac
+}
+
 # Resolve a browser id to a runnable argv and launch it detached, so the
 # caller (xdg-open) doesn't block on it. Falls back through KNOWN_BROWSER_IDS
 # if the requested one can't be resolved.
 launch_browser() {
-  local id="$1" url="$2" exec_line="" candidate
+  local id="$1" url="$2" want_private="${3:-0}" exec_line="" candidate
 
   exec_line=$(resolve_exec_line "$id")
   if [[ -z $exec_line ]]; then
@@ -174,6 +190,11 @@ launch_browser() {
 
   local -a argv=()
   mapfile -t argv < <(build_argv "$exec_line" "$url")
+  if [[ $want_private == 1 && ${#argv[@]} -gt 0 ]]; then
+    # Flags go right after the executable; some browsers ignore a private
+    # flag that trails the URL.
+    argv=("${argv[0]}" "$(private_flag_for "${argv[0]}")" "${argv[@]:1}")
+  fi
   log "launch: id=$id argv=(${argv[*]})"
 
   if command -v uwsm-app >/dev/null 2>&1; then
